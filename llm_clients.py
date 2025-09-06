@@ -70,12 +70,17 @@ Improved phrase:"""
             resp.raise_for_status()
             data = resp.json()
             
+            print(f"[generate_smart_suggestion] ===== RAW RESPONSE FOR '{phrase}' =====")
+            print(json.dumps(data, indent=2))
+            print(f"[generate_smart_suggestion] ===== END RAW RESPONSE =====")
+            
             content = None
             if isinstance(data, dict):
                 choices = data.get("choices") or []
                 if choices and len(choices) > 0:
                     message = choices[0].get("message", {})
                     content = message.get("content")
+                    print(f"[generate_smart_suggestion] Extracted content for '{phrase}': '{content}'")
             
             if content:
                 suggestion = content.strip().strip('"').strip("'").strip()
@@ -190,6 +195,7 @@ def build_prompt(doc_title: str,
     lines.append('- Only include phrases <= 12 words.')
     lines.append('- Use severities: high, medium, low.')
     lines.append('- EVERY finding MUST have a suggestion - no exceptions!')
+    lines.append('- In suggestions, provide ONLY the improved phrase - no explanatory text!')
     lines.append('- Context must include: phrase type, specific issue, why it\'s problematic, and improvement rationale.')
     lines.append('- Output must be a JSON object matching this exact schema:')
     lines.append('{')
@@ -203,7 +209,7 @@ def build_prompt(doc_title: str,
     lines.append('        "properties": {')
     lines.append('          "phrase": {"type": "string", "description": "The exact problematic text you identified"},')
     lines.append('          "severity": {"enum": ["low","medium","high"]},')
-    lines.append('          "suggestion": {"type": "string", "description": "MANDATORY concrete rewrite suggestion - NEVER leave empty"},')
+    lines.append('          "suggestion": {"type": "string", "description": "ONLY the improved phrase - no explanations or instructions"},')
     lines.append('          "context": {"type": "string", "description": "Detailed explanation including: phrase type, specific issue, why problematic, improvement rationale"}')
     lines.append('        }')
     lines.append('      }')
@@ -216,10 +222,13 @@ def build_prompt(doc_title: str,
     lines.append('MANDATORY REQUIREMENTS for each finding:')
     lines.append('- phrase: The exact problematic text you identified')
     lines.append('- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor')
-    lines.append('- suggestion: MANDATORY concrete rewrite suggestion - provide specific improved wording for EVERY finding')
+    lines.append('- suggestion: ONLY the improved phrase that replaces the problematic one - NO explanatory text')
     lines.append('- context: Must include 4 parts: 1) Type of phrase issue 2) Specific problem 3) Why it\'s problematic 4) How suggestion improves it')
     lines.append('')
-    lines.append('EXAMPLE CONTEXT FORMAT: "Tortured phrase - missing article. This phrase lacks grammatical completeness and sounds unnatural in academic writing. The suggestion adds the missing \'as\' to make it grammatically correct and more professional."')
+    lines.append('EXAMPLE OUTPUT:')
+    lines.append('- phrase: "serves powerful tool"')
+    lines.append('- suggestion: "serves as a powerful tool"')
+    lines.append('- context: "Tortured phrase - missing preposition. This phrase lacks grammatical completeness and sounds unnatural in academic writing. The suggestion adds the missing \'as\' to make it grammatically correct and more professional."')
     text = "\n".join(lines)
     return truncate_to_chars(text, max_chars)
 
@@ -234,8 +243,14 @@ async def call_routellm(model_name: str, prompt: str) -> Optional[ModelOutput]:
     }
     payload = {
         "model": model_name,
-        "input": prompt,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
         "response_format": {"type": "json_object"},
+        "stream": False
     }
     timeout = httpx.Timeout(settings.LLM_TIMEOUT_SECS, connect=5.0)
     try:
@@ -262,7 +277,23 @@ async def call_routellm(model_name: str, prompt: str) -> Optional[ModelOutput]:
             try:
                 # Parse new JSON format
                 parsed_data = json.loads(content)
-                print(f"[call_routellm] Parsed JSON from {model_name}: {json.dumps(parsed_data, indent=2)}")
+                print(f"[call_routellm] ===== COMPLETE JSON RESPONSE FROM {model_name} =====")
+                print(json.dumps(parsed_data, indent=2))
+                print(f"[call_routellm] ===== END JSON RESPONSE FROM {model_name} =====")
+                
+                # Show individual findings with suggestions for debugging
+                if isinstance(parsed_data, dict) and "findings" in parsed_data:
+                    findings_list = parsed_data["findings"]
+                    print(f"[call_routellm] {model_name} returned {len(findings_list)} findings:")
+                    for i, finding in enumerate(findings_list):
+                        phrase = finding.get("phrase", "N/A")
+                        suggestion = finding.get("suggestion", "N/A")
+                        severity = finding.get("severity", "N/A")
+                        print(f"[call_routellm]   {model_name} Raw Finding {i+1}:")
+                        print(f"[call_routellm]     phrase: '{phrase}'")
+                        print(f"[call_routellm]     suggestion: '{suggestion}'")
+                        print(f"[call_routellm]     severity: '{severity}'")
+                
                 result = await _convert_new_format_to_model_output(parsed_data)
                 if result:
                     print(f"[call_routellm] ✓ {model_name} SUCCESS: Converted to {len(result.findings)} findings")
@@ -340,8 +371,15 @@ From the provided page text, extract up to {max_findings_per_page} findings.
 
 CRITICAL REQUIREMENTS:
 - EVERY finding MUST have a concrete suggestion - no exceptions!
+- In suggestions, provide ONLY the improved phrase - no explanatory text!
 - Context must be detailed and include specific reasoning
 - Focus on tortured phrases, AI fingerprints, awkward sentences, and grammar issues
+
+SUGGESTION FORMAT INSTRUCTION:
+- In the 'suggestion' field, provide ONLY the improved phrase that should replace the problematic one
+- Do NOT include explanations like 'Rewrite as...' or 'Change to...'
+- Do NOT put quotes around the suggestion  
+- Just provide the clean, improved phrase directly
 
 Output must be a JSON object matching this exact schema:
 {{
@@ -355,7 +393,7 @@ Output must be a JSON object matching this exact schema:
         "properties": {{
           "phrase": {{"type": "string", "description": "The exact problematic text you identified"}},
           "severity": {{"enum": ["low","medium","high"]}},
-          "suggestion": {{"type": "string", "description": "MANDATORY concrete rewrite suggestion - NEVER leave empty"}},
+          "suggestion": {{"type": "string", "description": "ONLY the improved phrase - no explanations or instructions"}},
           "context": {{"type": "string", "description": "Detailed explanation including phrase type, specific issue, why problematic, improvement rationale"}}
         }}
       }}
@@ -368,7 +406,7 @@ Output must be a JSON object matching this exact schema:
 MANDATORY REQUIREMENTS for each finding:
 - phrase: The exact problematic text you identified
 - severity: "high" for clearly problematic, "medium" for questionable, "low" for minor  
-- suggestion: MANDATORY concrete rewrite suggestion with specific improved wording
+- suggestion: ONLY the improved phrase that replaces the problematic one - NO explanatory text
 - context: Must include 4 parts: 1) Type of issue (tortured phrase/AI fingerprint/grammar) 2) Specific problem 3) Why it's problematic 4) How suggestion improves it
 
 EXAMPLE CONTEXT: "Tortured phrase - grammatical incompleteness. This phrase lacks proper article usage and sounds unnatural in academic writing. The suggestion adds the missing 'as' to create grammatically correct and professional phrasing."
