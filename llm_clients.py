@@ -10,7 +10,103 @@ def truncate_to_chars(s: str, max_chars: int) -> str:
         return s
     return s[:max_chars]
 
-def _convert_new_format_to_model_output(parsed_data: dict) -> Optional[ModelOutput]:
+async def generate_smart_suggestion(phrase: str, context: str = "") -> str:
+    """
+    Generate intelligent suggestion by asking AI models for the improved phrase only.
+    """
+    # First try quick pattern-based fixes for common issues
+    phrase_lower = phrase.lower().strip()
+    
+    # Quick fixes for very common patterns
+    quick_fixes = {
+        'in order to': 'to',
+        'due to the fact that': 'because',
+        'with regard to': 'regarding',
+        'in the event that': 'if',
+        'by means of': 'by',
+    }
+    
+    for pattern, fix in quick_fixes.items():
+        if pattern in phrase_lower:
+            return phrase.replace(pattern, fix).replace(pattern.title(), fix.title())
+    
+    # For more complex issues, ask the AI model for just the improved phrase
+    prompt = f"""You are an expert editor. The following phrase has been identified as problematic in academic writing:
+
+PROBLEMATIC PHRASE: "{phrase}"
+
+CONTEXT: {context if context else "This phrase needs improvement for academic writing standards."}
+
+Your task: Provide ONLY the improved version of this exact phrase. Do not include explanations, quotes, or additional text - just return the corrected phrase that should replace the original.
+
+Requirements:
+- Keep the same meaning and intent
+- Fix grammar, add missing articles, improve word order
+- Make it sound natural and professional
+- Return only the improved phrase, nothing else
+
+Improved phrase:"""
+
+    try:
+        # Try route-llm for the suggestion using correct RouteLLM format
+        headers = {
+            "Authorization": f"Bearer {settings.ABACUS_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": "gpt-5",  # Use the standard route-llm model
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "stream": False
+        }
+        timeout = httpx.Timeout(15.0, connect=5.0)  # Shorter timeout for suggestions
+        
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(f"{settings.ABACUS_BASE_URL}/chat/completions", headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            content = None
+            if isinstance(data, dict):
+                choices = data.get("choices") or []
+                if choices and len(choices) > 0:
+                    message = choices[0].get("message", {})
+                    content = message.get("content")
+            
+            if content:
+                suggestion = content.strip().strip('"').strip("'").strip()
+                # Basic validation - should be similar length and not just explanation
+                if suggestion and len(suggestion) < len(phrase) * 3 and suggestion.lower() != phrase.lower():
+                    print(f"[generate_smart_suggestion] AI suggestion for '{phrase}': '{suggestion}'")
+                    return suggestion
+                    
+    except Exception as e:
+        print(f"[generate_smart_suggestion] AI call failed for '{phrase}': {e}")
+    
+    # Fallback to pattern-based fixes if AI fails
+    if 'serves' in phrase_lower and 'tool' in phrase_lower and 'as' not in phrase_lower:
+        return phrase.replace('serves', 'serves as a', 1)
+    
+    if 'provides' in phrase_lower and ('overview' in phrase_lower or 'analysis' in phrase_lower) and ' a ' not in phrase_lower:
+        return phrase.replace('provides', 'provides a', 1)
+    
+    if 'offers' in phrase_lower and ' a ' not in phrase_lower and ('perspective' in phrase_lower or 'solution' in phrase_lower):
+        return phrase.replace('offers', 'offers a', 1)
+    
+    if 'represents' in phrase_lower and ' a ' not in phrase_lower and ('advance' in phrase_lower or 'improvement' in phrase_lower):
+        return phrase.replace('represents', 'represents a', 1)
+    
+    # Last resort - simple suggestion
+    if len(phrase.split()) <= 3:
+        return f"[Improve: {phrase}]"
+    else:
+        return f"[Rewrite: {phrase}]"
+
+async def _convert_new_format_to_model_output(parsed_data: dict) -> Optional[ModelOutput]:
     """
     Convert simplified JSON format to ModelOutput for backward compatibility.
     """
@@ -31,8 +127,14 @@ def _convert_new_format_to_model_output(parsed_data: dict) -> Optional[ModelOutp
                 
             # Validate suggestion is not empty - this is now mandatory
             if not suggestion or suggestion.strip() == '':
-                print(f"[llm_clients] Warning: Empty suggestion for phrase '{phrase}' - generating fallback")
-                suggestion = f"Rewrite '{phrase}' for better clarity and academic tone"
+                print(f"[llm_clients] Warning: Empty suggestion for phrase '{phrase}' - generating context-aware fallback")
+                # Generate a more meaningful suggestion based on AI with context
+                suggestion = await generate_smart_suggestion(phrase, context)
+            
+            # Validate context is not empty
+            if not context or context.strip() == '':
+                print(f"[llm_clients] Warning: Empty context for phrase '{phrase}' - generating fallback")
+                context = f"Grammatical or stylistic issue identified in '{phrase}' that requires improvement for academic writing standards"
             
             # Convert severity to title case for compatibility
             severity_map = {'low': 'Low', 'medium': 'Medium', 'high': 'High'}
@@ -161,7 +263,7 @@ async def call_routellm(model_name: str, prompt: str) -> Optional[ModelOutput]:
                 # Parse new JSON format
                 parsed_data = json.loads(content)
                 print(f"[call_routellm] Parsed JSON from {model_name}: {json.dumps(parsed_data, indent=2)}")
-                result = _convert_new_format_to_model_output(parsed_data)
+                result = await _convert_new_format_to_model_output(parsed_data)
                 if result:
                     print(f"[call_routellm] ✓ {model_name} SUCCESS: Converted to {len(result.findings)} findings")
                     for i, finding in enumerate(result.findings[:3]):  # Show first 3
@@ -283,15 +385,22 @@ Page {page_num} text:
                 print(f"[query_models_discover] ✓ Page {page_num}: Found {len(result.findings)} findings from {settings.DISCOVERY_MODEL_NAME}")
                 for i, finding in enumerate(result.findings):
                     print(f"[query_models_discover]   Page {page_num} Finding {i+1}: '{finding.phrase}' -> '{finding.suggestion}' (severity: {finding.severity})")
+                    
+                    # Ensure suggestion is never empty
+                    suggestion = finding.suggestion
+                    if not suggestion or suggestion.strip() == '':
+                        suggestion = f"Rewrite '{finding.phrase}' for better clarity and academic tone"
+                        print(f"[query_models_discover]   Warning: Empty suggestion for '{finding.phrase}' - using fallback")
+                    
                     # Create Finding object and set the correct page number from our context
                     new_finding = Finding(
                         phrase=finding.phrase.lower(),  # normalize to lowercase for dedup/merge
                         severity=finding.severity,
-                        suggestion=finding.suggestion or None,
+                        suggestion=suggestion,
                         page=page_num,  # Use the page number from our loop context, not from AI
                         start_char=finding.start_char,
                         end_char=finding.end_char,
-                        context=finding.context or None,
+                        context=finding.context or "Issue identified requiring attention",
                         source="LLM",
                     )
                     findings.append(new_finding)

@@ -7,6 +7,24 @@ import json
 from word_expansion import get_phrase_candidates_for_word, analyze_single_word_with_llm
 from models import Finding
 
+async def generate_smart_suggestion(phrase: str, context: str = "") -> str:
+    """
+    Generate intelligent suggestion by asking AI models for the improved phrase only.
+    """
+    # Import here to avoid circular imports
+    from llm_clients import generate_smart_suggestion as ai_suggestion
+    try:
+        return await ai_suggestion(phrase, context)
+    except Exception as e:
+        print(f"[single_word_matcher] AI suggestion failed for '{phrase}': {e}")
+        # Quick pattern-based fallbacks
+        phrase_lower = phrase.lower().strip()
+        if 'serves' in phrase_lower and 'tool' in phrase_lower and 'as' not in phrase_lower:
+            return phrase.replace('serves', 'serves as a', 1)
+        if 'provides' in phrase_lower and ('overview' in phrase_lower or 'analysis' in phrase_lower) and ' a ' not in phrase_lower:
+            return phrase.replace('provides', 'provides a', 1)
+        return f"[Improve: {phrase}]"
+
 class SingleWordMatcher:
     def __init__(self):
         self._words: List[str] = []
@@ -216,7 +234,7 @@ class SingleWordMatcher:
                 print(f"[SingleWordMatcher] ✓ GPT-5 SINGLE WORD BATCH SUCCESS: {len(result.findings)} findings")
                 for i, finding_data in enumerate(result.findings):
                     # Convert new format to Finding object
-                    finding = self._convert_to_finding(finding_data)
+                    finding = await self._convert_to_finding(finding_data)
                     if finding:
                         finding.source = "LLM-SingleWord-Batch"
                         all_findings.append(finding)
@@ -235,7 +253,7 @@ class SingleWordMatcher:
                 print(f"[SingleWordMatcher] ✓ CLAUDE SINGLE WORD BATCH SUCCESS: {len(result.findings)} findings")
                 for i, finding_data in enumerate(result.findings):
                     # Convert new format to Finding object
-                    finding = self._convert_to_finding(finding_data)
+                    finding = await self._convert_to_finding(finding_data)
                     if finding:
                         finding.source = "LLM-SingleWord-Batch"
                         all_findings.append(finding)
@@ -262,7 +280,7 @@ class SingleWordMatcher:
         
         return all_findings
     
-    def _convert_to_finding(self, finding_data: dict) -> Optional[Finding]:
+    async def _convert_to_finding(self, finding_data: dict) -> Optional[Finding]:
         """
         Convert simplified JSON format to Finding object.
         """
@@ -279,8 +297,13 @@ class SingleWordMatcher:
             
             # Validate suggestion is not empty - this is now mandatory
             if not suggestion or suggestion.strip() == '':
-                print(f"[SingleWordMatcher] Warning: Empty suggestion for phrase '{phrase}' - generating fallback")
-                suggestion = f"Rewrite '{phrase}' for better clarity and academic tone"
+                print(f"[SingleWordMatcher] Warning: Empty suggestion for phrase '{phrase}' - generating smart fallback")
+                suggestion = await generate_smart_suggestion(phrase, context)
+            
+            # Validate context is not empty
+            if not context or context.strip() == '':
+                print(f"[SingleWordMatcher] Warning: Empty context for phrase '{phrase}' - generating fallback")
+                context = "Single word analysis - issue identified requiring attention and improvement"
             
             # Convert severity to title case for compatibility
             severity_map = {'low': 'Low', 'medium': 'Medium', 'high': 'High'}

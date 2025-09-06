@@ -28,6 +28,8 @@ from models import AnalyzeResponse, ModelOutput, Finding, SEV_INT_TO_TEXT, SEV_T
 from csv_loader import load_csv_streaming, normalize_phrase
 from matcher_ac import global_matcher
 from single_word_matcher import global_single_word_matcher
+from llm_clients import generate_smart_suggestion
+import asyncio
 from pdf_utils import extract_text_per_page, content_hash_bytes
 from reporting import build_report_pdf
 from llm_clients import query_models, query_models_discover
@@ -346,6 +348,20 @@ async def analyze_internal(job_id: str, bytes_data: bytes, filename: str, severi
     all_llm_discovered = (llm_discovered or []) + single_word_findings
     
     merged = merge_findings(local_findings, model_findings_all, WEIGHT_BY_PHRASE, llm_discovered=all_llm_discovered)
+
+    # Final validation to ensure no empty suggestions or context
+    async def validate_findings():
+        for finding in merged:
+            if not finding.suggestion or finding.suggestion.strip() == '':
+                print(f"[main] Warning: Empty suggestion for '{finding.phrase}' after merge - generating smart fallback")
+                finding.suggestion = await generate_smart_suggestion(finding.phrase, finding.context or "")
+            
+            if not finding.context or finding.context.strip() == '':
+                print(f"[main] Warning: Empty context for '{finding.phrase}' after merge - fixing")
+                finding.context = "Issue identified requiring attention and improvement"
+    
+    # Run validation async
+    await validate_findings()
 
     # 8) Compose title/summary
     doc_title = detected_title

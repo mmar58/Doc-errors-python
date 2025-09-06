@@ -6,6 +6,24 @@ import re
 import json
 from models import Finding
 
+async def generate_smart_suggestion(phrase: str, context: str = "") -> str:
+    """
+    Generate intelligent suggestion by asking AI models for the improved phrase only.
+    """
+    # Import here to avoid circular imports
+    from llm_clients import generate_smart_suggestion as ai_suggestion
+    try:
+        return await ai_suggestion(phrase, context)
+    except Exception as e:
+        print(f"[word_expansion] AI suggestion failed for '{phrase}': {e}")
+        # Quick pattern-based fallbacks
+        phrase_lower = phrase.lower().strip()
+        if 'serves' in phrase_lower and 'tool' in phrase_lower and 'as' not in phrase_lower:
+            return phrase.replace('serves', 'serves as a', 1)
+        if 'provides' in phrase_lower and ('overview' in phrase_lower or 'analysis' in phrase_lower) and ' a ' not in phrase_lower:
+            return phrase.replace('provides', 'provides a', 1)
+        return f"[Improve: {phrase}]"
+
 def extract_phrase_around_word(text: str, word: str, start_pos: int, context_window: int = 50) -> Tuple[str, int, int]:
     """
     Extract a meaningful phrase around a single word match.
@@ -199,6 +217,16 @@ async def analyze_single_word_with_llm(
         result = await call_routellm(settings.ROUTELLM_MODEL_GPT5, prompt)
         if result and result.findings:
             for finding in result.findings:
+                # Validate and fix empty suggestions
+                if not finding.suggestion or finding.suggestion.strip() == '':
+                    print(f"[word_expansion] Warning: Empty suggestion for '{finding.phrase}' - generating smart fallback")
+                    finding.suggestion = await generate_smart_suggestion(finding.phrase, finding.context)
+                
+                # Validate and fix empty context
+                if not finding.context or finding.context.strip() == '':
+                    print(f"[word_expansion] Warning: Empty context for '{finding.phrase}' - generating fallback")
+                    finding.context = "Single word analysis - issue identified requiring attention and improvement"
+                
                 finding.source = "LLM-SingleWord"
                 finding.page = page_num
                 findings.append(finding)
@@ -210,6 +238,16 @@ async def analyze_single_word_with_llm(
         result = await call_routellm(settings.ROUTELLM_MODEL_CLAUDE, prompt)
         if result and result.findings:
             for finding in result.findings:
+                # Validate and fix empty suggestions
+                if not finding.suggestion or finding.suggestion.strip() == '':
+                    print(f"[word_expansion] Warning: Empty suggestion for '{finding.phrase}' - generating smart fallback")
+                    finding.suggestion = await generate_smart_suggestion(finding.phrase, finding.context)
+                
+                # Validate and fix empty context
+                if not finding.context or finding.context.strip() == '':
+                    print(f"[word_expansion] Warning: Empty context for '{finding.phrase}' - generating fallback")
+                    finding.context = "Single word analysis - issue identified requiring attention and improvement"
+                
                 finding.source = "LLM-SingleWord"
                 finding.page = page_num
                 findings.append(finding)
