@@ -3,6 +3,7 @@ Module for expanding single words into contextual phrases for analysis
 """
 from typing import List, Tuple, Optional, Dict
 import re
+import json
 from models import Finding
 
 def extract_phrase_around_word(text: str, word: str, start_pos: int, context_window: int = 50) -> Tuple[str, int, int]:
@@ -150,25 +151,47 @@ async def analyze_single_word_with_llm(
         "Task: Analyze if this word appears in problematic 'tortured phrases' within the given contexts.",
         "For each context where you identify issues:",
         "1. Extract the specific problematic phrase containing the word",
-        "2. Assign severity: High (clearly problematic), Medium (questionable), Low (minor issue)",
+        "2. Assign severity: high, medium, or low",
         "3. Provide a concrete rewrite suggestion",
-        "4. Give brief reasoning",
+        "4. Categorize the type of issue",
         "",
-        "Output must be a JSON object with exactly these keys:",
-        '- doc_title: null',
-        '- summary: null', 
-        '- findings: array of objects with keys: phrase, severity, suggestion, page, start_char, end_char, context',
+        "Output must be a JSON object matching this exact schema:",
+        '{',
+        '  "type": "object",',
+        '  "properties": {',
+        '    "findings": {',
+        '      "type": "array",',
+        '      "items": {',
+        '        "type": "object",',
+        '        "required": ["category","page","section","span","exact","suggestion","rationale","severity"],',
+        '        "properties": {',
+        '          "category": {"enum": ["tortured_phrase","ai_fingerprint","awkward_sentence","grammar_formatting"]},',
+        '          "page": {"type": "integer", "minimum": 1},',
+        '          "section": {"type": "string"},',
+        '          "span": {"type": "string", "description": "span_id from sentences.jsonl"},',
+        '          "exact": {"type": "string"},',
+        '          "suggestion": {"type": "string"},',
+        '          "rationale": {"type": "string", "maxLength": 240},',
+        '          "severity": {"enum": ["low","medium","high"]}',
+        '        }',
+        '      }',
+        '    }',
+        '  },',
+        '  "required": ["findings"],',
+        '  "additionalProperties": false',
+        '}',
         "",
-        "For findings array, each object must have:",
-        '- phrase: the problematic phrase you identified (not just the single word)',
-        '- severity: "High", "Medium", or "Low"',
-        '- suggestion: concrete rewrite suggestion',
+        "For each finding:",
+        '- category: Use "tortured_phrase" for problematic academic phrases',
         '- page: ' + str(page_num),
-        '- start_char: null',
-        '- end_char: null', 
-        '- context: brief explanation of the issue',
+        '- section: Brief description of document section',
+        '- span: Use format "page_' + str(page_num) + '_span_X" where X is a unique span ID',
+        '- exact: The exact problematic text you identified',
+        '- suggestion: Your concrete rewrite suggestion',
+        '- rationale: Brief explanation of why this is problematic (max 240 chars)',
+        '- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor',
         "",
-        "Only include findings where you're confident there's an actual issue. Use empty findings array if no problems found."
+        "Only include findings where you're confident there's an actual issue."
     ])
     
     prompt = "\n".join(prompt_lines)

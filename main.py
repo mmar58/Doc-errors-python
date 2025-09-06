@@ -275,7 +275,7 @@ async def analyze_internal(job_id: str, bytes_data: bytes, filename: str, severi
             if word_matches:
                 print(f"[analyze_internal] Found {len(word_matches)} single word matches for LLM analysis")
                 single_word_findings = await global_single_word_matcher.analyze_words_with_llm(
-                    word_matches, detected_title
+                    word_matches, detected_title, job_id
                 )
                 print(f"[analyze_internal] LLM identified {len(single_word_findings)} issues from single words")
             else:
@@ -544,19 +544,25 @@ def ui_result(job_id: str):
         phrase = (f.phrase or "").replace("<", "&lt;").replace(">", "&gt;")
         suggestion = (f.suggestion or "").replace("<", "&lt;").replace(">", "&gt;")
         context = (f.context or "").replace("<", "&lt;").replace(">", "&gt;")
+        
         cards_html.append(f"""
-          <div style="border:1px solid #e5e7eb; border-radius:10px; margin:16px 0; overflow:hidden;">
-            <div style="height: 8px; background:{color};"></div>
-            <div style="padding:16px;">
-              <div><strong>Severity:</strong> {f.severity}{' [LLM]' if getattr(f, 'source', 'CSV') == 'LLM' else ''}</div>
+          <div style="border-left: 4px solid {color}; background: white; margin: 16px 0; padding: 16px; border-radius: 0 8px 8px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 12px;">
+              <div><strong>Severity:</strong> <span style="color: {color}; font-weight: bold;">{f.severity}</span></div>
               <div><strong>Page:</strong> {f.page}</div>
-              <div style="margin-top:8px;"><strong>Exact Matched Phrase:</strong><br/>"<code>{phrase}</code>"</div>
-              {"<div style='margin-top:8px;'><strong>Suggested Rewrite:</strong><br/>\"<code>%s</code>\"</div>" % suggestion if suggestion else ""}
-              <div style="margin-top:12px; color:#374151;">
-                <div style="font-weight:600; margin-bottom:4px;">Context:</div>
-                <div style="background:#f9fafb; padding:8px; border-radius:6px; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space:pre-wrap;">
-                  {context}
-                </div>
+            </div>
+            
+            <div style="margin-bottom: 12px;">
+              <strong>Exact Matched Phrase:</strong><br/>
+              <span style="background: #f3f4f6; padding: 4px 8px; border-radius: 4px; font-family: monospace; color: #374151;">"{phrase}"</span>
+            </div>
+            
+            {"<div style='margin-bottom: 12px;'><strong>Suggested Rewrite:</strong><br/><span style='background: #ecfdf5; padding: 4px 8px; border-radius: 4px; font-family: monospace; color: #065f46;'>\"" + suggestion + "\"</span></div>" if suggestion else ""}
+            
+            <div style="background: #f9fafb; padding: 12px; border-radius: 6px; border-left: 3px solid #d1d5db;">
+              <div style="font-weight: 600; color: #374151; margin-bottom: 4px;">Context:</div>
+              <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: #6b7280; line-height: 1.4;">
+                {context}
               </div>
             </div>
           </div>

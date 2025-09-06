@@ -10,6 +10,62 @@ def truncate_to_chars(s: str, max_chars: int) -> str:
         return s
     return s[:max_chars]
 
+def _convert_new_format_to_model_output(parsed_data: dict) -> Optional[ModelOutput]:
+    """
+    Convert new JSON format to ModelOutput for backward compatibility.
+    """
+    try:
+        findings_list = []
+        findings_data = parsed_data.get('findings', [])
+        
+        for finding_data in findings_data:
+            # Extract fields from new format
+            category = finding_data.get('category', 'tortured_phrase')
+            page = finding_data.get('page', 1)
+            section = finding_data.get('section', '')
+            span = finding_data.get('span', '')
+            exact = finding_data.get('exact', '')
+            suggestion = finding_data.get('suggestion', '')
+            rationale = finding_data.get('rationale', '')
+            severity = finding_data.get('severity', 'medium')
+            
+            # Convert severity to title case for compatibility
+            severity_map = {'low': 'Low', 'medium': 'Medium', 'high': 'High'}
+            severity_title = severity_map.get(severity.lower(), 'Medium')
+            
+            # Create context from section and rationale
+            context_parts = []
+            if section:
+                context_parts.append(f"Section: {section}")
+            if rationale:
+                context_parts.append(f"Issue: {rationale}")
+            if span:
+                context_parts.append(f"Span: {span}")
+            
+            context = " | ".join(context_parts) if context_parts else rationale
+            
+            finding = Finding(
+                phrase=exact,
+                severity=severity_title,
+                suggestion=suggestion,
+                page=page,
+                start_char=None,
+                end_char=None,
+                context=context,
+                source="LLM"
+            )
+            findings_list.append(finding)
+        
+        return ModelOutput(
+            doc_title=parsed_data.get('doc_title'),
+            summary=parsed_data.get('summary'),
+            findings=findings_list
+        )
+        
+    except Exception as e:
+        print(f"[llm_clients] Error converting new format: {e}")
+        return None
+
 def build_prompt(doc_title: str,
                  unique_matches_sorted: List[Tuple[str, str, int]],
                  snippets: Dict[str, str],
@@ -36,10 +92,41 @@ def build_prompt(doc_title: str,
     lines.append("2) Identify additional high/medium/low severity phrases not in the list discovered from the snippets, with page if inferable.")
     lines.append("Rules:")
     lines.append('- Only include phrases <= 12 words.')
-    lines.append('- If positions are unknown, set start_char and end_char to null.')
-    lines.append('- Use severities: High, Medium, Low.')
-    lines.append('- Output must be a JSON object with keys: doc_title (optional), summary (optional), findings (array).')
-    lines.append('- findings items must have: phrase, severity, suggestion, page (1-based integer), start_char (int|null), end_char (int|null), context (string|null).')
+    lines.append('- Use severities: high, medium, low.')
+    lines.append('- Output must be a JSON object matching this exact schema:')
+    lines.append('{')
+    lines.append('  "type": "object",')
+    lines.append('  "properties": {')
+    lines.append('    "findings": {')
+    lines.append('      "type": "array",')
+    lines.append('      "items": {')
+    lines.append('        "type": "object",')
+    lines.append('        "required": ["category","page","section","span","exact","suggestion","rationale","severity"],')
+    lines.append('        "properties": {')
+    lines.append('          "category": {"enum": ["tortured_phrase","ai_fingerprint","awkward_sentence","grammar_formatting"]},')
+    lines.append('          "page": {"type": "integer", "minimum": 1},')
+    lines.append('          "section": {"type": "string"},')
+    lines.append('          "span": {"type": "string", "description": "span_id from sentences.jsonl"},')
+    lines.append('          "exact": {"type": "string"},')
+    lines.append('          "suggestion": {"type": "string"},')
+    lines.append('          "rationale": {"type": "string", "maxLength": 240},')
+    lines.append('          "severity": {"enum": ["low","medium","high"]}')
+    lines.append('        }')
+    lines.append('      }')
+    lines.append('    }')
+    lines.append('  },')
+    lines.append('  "required": ["findings"],')
+    lines.append('  "additionalProperties": false')
+    lines.append('}')
+    lines.append('For each finding:')
+    lines.append('- category: Use "tortured_phrase" for problematic academic phrases')
+    lines.append('- page: The page number where the issue was found')
+    lines.append('- section: Brief description of document section (e.g., "Introduction", "Methods")')
+    lines.append('- span: Use format "page_X_span_Y" where X is page number and Y is a unique span ID')
+    lines.append('- exact: The exact problematic text you identified')
+    lines.append('- suggestion: Your concrete rewrite suggestion')
+    lines.append('- rationale: Brief explanation of why this is problematic (max 240 chars)')
+    lines.append('- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor')
     text = "\n".join(lines)
     return truncate_to_chars(text, max_chars)
 
@@ -72,10 +159,12 @@ async def call_routellm(model_name: str, prompt: str) -> Optional[ModelOutput]:
             if not content:
                 return None
             try:
-                return ModelOutput.model_validate_json(content)
-            except Exception:
-                # Try to coerce if minor issues
-                return ModelOutput(**json.loads(content))
+                # Parse new JSON format
+                parsed_data = json.loads(content)
+                return _convert_new_format_to_model_output(parsed_data)
+            except Exception as e:
+                print(f"[llm_clients] Error parsing LLM response: {e}")
+                return None
     except Exception:
         return None
 
@@ -113,16 +202,44 @@ async def query_models_discover(
         if not page_text or not page_text.strip():
             continue
 
-        prompt = f"""
-You are auditing scientific/technical prose for "tortured phrases" or risky wording that should be rewritten.
+        prompt = f"""You are auditing scientific/technical prose for "tortured phrases" or risky wording that should be rewritten.
 From the provided page text, extract up to {max_findings_per_page} findings.
-Return a clean JSON array with objects having exactly these keys:
-- phrase: the exact risky wording span as appears
-- severity: High/Medium/Low (High if strongly problematic, Medium otherwise, Low for minor)
-- suggestion: a concise rewrite
-- context: short context line (<= 240 chars) that includes the phrase
 
-Do not include any keys other than those four. Use the page text verbatim for the phrase.
+Output must be a JSON object matching this exact schema:
+{{
+  "type": "object",
+  "properties": {{
+    "findings": {{
+      "type": "array",
+      "items": {{
+        "type": "object",
+        "required": ["category","page","section","span","exact","suggestion","rationale","severity"],
+        "properties": {{
+          "category": {{"enum": ["tortured_phrase","ai_fingerprint","awkward_sentence","grammar_formatting"]}},
+          "page": {{"type": "integer", "minimum": 1}},
+          "section": {{"type": "string"}},
+          "span": {{"type": "string", "description": "span_id from sentences.jsonl"}},
+          "exact": {{"type": "string"}},
+          "suggestion": {{"type": "string"}},
+          "rationale": {{"type": "string", "maxLength": 240}},
+          "severity": {{"enum": ["low","medium","high"]}}
+        }}
+      }}
+    }}
+  }},
+  "required": ["findings"],
+  "additionalProperties": false
+}}
+
+For each finding:
+- category: Use "tortured_phrase" for problematic academic phrases
+- page: {page_num}
+- section: Brief description of document section
+- span: Use format "page_{page_num}_span_X" where X is a unique span ID
+- exact: The exact problematic text you identified
+- suggestion: Your concrete rewrite suggestion
+- rationale: Brief explanation of why this is problematic (max 240 chars)
+- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor
 
 Page {page_num} text:
 \"\"\"{page_text[:6000]}\"\"\"  # hard cap to avoid oversized prompts
