@@ -81,17 +81,13 @@ class AnalyzeResponse(BaseModel):
     job_id: str
     report_json: ModelOutput
     download_url: str
+
 class HealthResponse(BaseModel):
     status: str
     local_only: bool
     phrases_loaded: int
     max_prompt_matches: int
     max_prompt_chars: int
-
-# Per-phrase metadata stored from CSV
-# compact tuple form for memory:
-# (csv_sev:int, feedback:Optional[str], tags:Tuple[str,...], weight:int, enabled:bool, source:Optional[str], version:Optional[str], example:Optional[str], locale:Optional[str], regex:Optional[bool])
-MetaTuple = Tuple[int, Optional[str], Tuple[str, ...], int, bool, Optional[str], Optional[str], Optional[str], Optional[str], Optional[bool]]
 
 def sev_rank(s: str) -> int:
     return SEV_TEXT_TO_INT.get(s.lower(), SEV_MED)

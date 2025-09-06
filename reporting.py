@@ -41,7 +41,16 @@ def build_report_pdf(path: str,
         flow.append(Paragraph(f"{sev} Severity", bold))
         flow.append(Spacer(1, 0.05*inch))
         for it in items:
-            phrase_line = f"Phrase: <b>{it.phrase}</b> (Page {it.page})"
+            # Add source indicator for better visibility
+            source_tag = ""
+            if it.source == "LLM-SingleWord":
+                source_tag = " [AI-Enhanced]"
+            elif it.source == "LLM":
+                source_tag = " [AI-Discovered]"
+            elif it.source == "CSV":
+                source_tag = " [Lexicon]"
+            
+            phrase_line = f"Phrase: <b>{it.phrase}</b> (Page {it.page}){source_tag}"
             flow.append(Paragraph(phrase_line, normal))
             if it.context:
                 flow.append(Paragraph(f"Context: {it.context}", small))

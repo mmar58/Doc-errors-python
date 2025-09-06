@@ -12,6 +12,10 @@ def normalize_phrase(s: str) -> str:
 def word_count(s: str) -> int:
     return len(s.split())
 
+def is_single_word(phrase: str) -> bool:
+    """Check if the phrase is a single word"""
+    return word_count(phrase) == 1
+
 def _safe_sniff(sample: str):
     """
     Try to sniff a CSV dialect. Validate fields that commonly break (delimiter, quotechar, escapechar).
@@ -47,9 +51,10 @@ def _safe_sniff(sample: str):
 
     return d, "sniff_ok"
 
-def load_csv_streaming(path: str) -> Tuple[Dict[str, MetaTuple], List[str]]:
+def load_csv_streaming(path: str) -> Tuple[Dict[str, MetaTuple], List[str], Dict[str, MetaTuple]]:
     phrase_meta: Dict[str, MetaTuple] = {}
     automaton_phrases: List[str] = []
+    single_words_meta: Dict[str, MetaTuple] = {}  # Track single words separately
 
     try:
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
@@ -219,10 +224,14 @@ def load_csv_streaming(path: str) -> Tuple[Dict[str, MetaTuple], List[str]]:
         if prev is None or (w, sev_pref, text_len) > (prev[0], prev[1], prev[2]):
             best[phrase_norm] = (w, sev_pref, text_len, phrase_raw, meta)
 
-    # Build final dict/list
+    # Build final dict/list, separating single words from phrases
     for norm, (_w, _sv, _tl, _orig, meta) in best.items():
-        phrase_meta[norm] = meta
-        automaton_phrases.append(norm)
+        if is_single_word(norm):
+            single_words_meta[norm] = meta
+            # print(f"[csv_loader] single_word_detected: '{norm}'")
+        else:
+            phrase_meta[norm] = meta
+            automaton_phrases.append(norm)
 
-    print(f"[csv_loader] loaded_phrases={len(automaton_phrases)} unique={len(phrase_meta)}")
-    return phrase_meta, automaton_phrases
+    print(f"[csv_loader] loaded_phrases={len(automaton_phrases)} single_words={len(single_words_meta)} unique={len(phrase_meta)}")
+    return phrase_meta, automaton_phrases, single_words_meta

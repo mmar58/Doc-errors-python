@@ -2,7 +2,7 @@ import json
 import asyncio
 from typing import Dict, List, Tuple, Optional, Any
 import httpx
-from models import ModelOutput, Finding, SEV_INT_TO_TEXT, SEV_TEXT_TO_INT
+from models import ModelOutput, Finding, SEV_INT_TO_TEXT, SEV_TEXT_TO_INT, normalize_sev_text
 from config import settings
 
 def truncate_to_chars(s: str, max_chars: int) -> str:
@@ -128,33 +128,20 @@ Page {page_num} text:
 \"\"\"{page_text[:6000]}\"\"\"  # hard cap to avoid oversized prompts
 """
         try:
-            resp = await route_llm_call(
-                api_key=settings.ABACUS_API_KEY,
-                model=settings.DISCOVERY_MODEL_NAME,
-                system_prompt="You return strict JSON only.",
-                user_prompt=prompt,
-                response_format="json",
-                temperature=0.2,
-                max_tokens=600,
-            )
-            data = resp.json_obj  # route_llm_call should parse if response_format is json
-            if isinstance(data, list):
-                for item in data:
-                    phrase = (item.get("phrase") or "").strip()
-                    sev = normalize_sev_text(item.get("severity") or "")
-                    suggestion = (item.get("suggestion") or "").strip()
-                    context = (item.get("context") or "").strip()
-                    if phrase:
-                        findings.append(Finding(
-                            phrase=phrase.lower(),  # normalize to lowercase for dedup/merge
-                            severity=sev,
-                            suggestion=suggestion or None,
-                            page=page_num,
-                            start_char=None,
-                            end_char=None,
-                            context=context or None,
-                            source="LLM",
-                        ))
+            # Use our existing call_routellm function instead of route_llm_call
+            result = await call_routellm(settings.DISCOVERY_MODEL_NAME, prompt)
+            if result and result.findings:
+                for finding in result.findings:
+                    findings.append(Finding(
+                        phrase=finding.phrase.lower(),  # normalize to lowercase for dedup/merge
+                        severity=finding.severity,
+                        suggestion=finding.suggestion or None,
+                        page=page_num,
+                        start_char=finding.start_char,
+                        end_char=finding.end_char,
+                        context=finding.context or None,
+                        source="LLM",
+                    ))
         except Exception as e:
             print(f"[discover] page={page_num} failed: {type(e).__name__}: {e}")
             continue

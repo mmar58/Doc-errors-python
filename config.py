@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # Optional enhancements (off by default)
     ENABLE_AUTOMATON_CACHE: bool = Field(default=False)
     ENABLE_PAGE_PARALLEL: bool = Field(default=False)
+    ENABLE_SINGLE_WORD_ANALYSIS: bool = Field(default=True)  # New feature
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 
