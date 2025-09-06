@@ -548,35 +548,42 @@ def ui_result(job_id: str):
         # Add source indicator for enhanced tracking
         source_badge = ""
         if f.source == "LLM-SingleWord-Batch":
-            source_badge = " <span style='background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500;'>AI-Enhanced Single Word</span>"
+            source_badge = " <span style='background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500; margin-left: 8px;'>AI-Enhanced</span>"
         elif f.source == "LLM-SingleWord":
-            source_badge = " <span style='background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500;'>AI-Enhanced Single Word</span>"
+            source_badge = " <span style='background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500; margin-left: 8px;'>AI-Enhanced</span>"
         elif f.source == "LLM":
-            source_badge = " <span style='background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500;'>AI-Discovered</span>"
+            source_badge = " <span style='background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500; margin-left: 8px;'>AI-Discovered</span>"
         elif f.source == "CSV":
-            source_badge = " <span style='background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500;'>Lexicon</span>"
+            source_badge = " <span style='background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500; margin-left: 8px;'>Lexicon</span>"
         
         cards_html.append(f"""
           <div style="border-left: 4px solid {color}; background: white; margin: 16px 0; padding: 16px; border-radius: 0 8px 8px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <div style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 12px; align-items: center;">
-              <div><strong>Severity:</strong> <span style="color: {color}; font-weight: bold;">{f.severity}</span></div>
-              <div><strong>Page:</strong> {f.page}</div>
-              {source_badge}
-            </div>
             
+            <!-- Row 1: Severity -->
             <div style="margin-bottom: 12px;">
-              <strong>Exact Matched Phrase:</strong><br/>
-              <span style="background: #f3f4f6; padding: 4px 8px; border-radius: 4px; font-family: monospace; color: #374151;">"{phrase}"</span>
+              <strong>Severity:</strong> <span style="color: {color}; font-weight: bold;">{f.severity}</span>{source_badge}
             </div>
             
-            {"<div style='margin-bottom: 12px;'><strong>Suggested Rewrite:</strong><br/><span style='background: #ecfdf5; padding: 4px 8px; border-radius: 4px; font-family: monospace; color: #065f46;'>\"" + suggestion + "\"</span></div>" if suggestion else ""}
-            
-            <div style="background: #f9fafb; padding: 12px; border-radius: 6px; border-left: 3px solid #d1d5db;">
-              <div style="font-weight: 600; color: #374151; margin-bottom: 4px;">Context:</div>
-              <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: #6b7280; line-height: 1.4;">
-                {context}
-              </div>
+            <!-- Row 2: Page -->
+            <div style="margin-bottom: 12px;">
+              <strong>Page:</strong> {f.page}
             </div>
+            
+            <!-- Row 3: Exact Matched Phrase -->
+            <div style="margin-bottom: 12px;">
+              <strong>Exact Matched Phrase:</strong> "{phrase}"
+            </div>
+            
+            <!-- Row 4: Suggested Rewrite -->
+            <div style="margin-bottom: 12px;">
+              <strong>Suggested Rewrite:</strong> "{suggestion}"
+            </div>
+            
+            <!-- Row 5: Context -->
+            <div style="margin-bottom: 0;">
+              <strong>Context:</strong> {context}
+            </div>
+            
           </div>
         """)
 

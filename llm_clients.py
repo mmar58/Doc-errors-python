@@ -26,7 +26,13 @@ def _convert_new_format_to_model_output(parsed_data: dict) -> Optional[ModelOutp
             context = finding_data.get('context', '')
             
             if not phrase:
+                print(f"[llm_clients] Skipping finding with empty phrase")
                 continue
+                
+            # Validate suggestion is not empty - this is now mandatory
+            if not suggestion or suggestion.strip() == '':
+                print(f"[llm_clients] Warning: Empty suggestion for phrase '{phrase}' - generating fallback")
+                suggestion = f"Rewrite '{phrase}' for better clarity and academic tone"
             
             # Convert severity to title case for compatibility
             severity_map = {'low': 'Low', 'medium': 'Medium', 'high': 'High'}
@@ -39,7 +45,7 @@ def _convert_new_format_to_model_output(parsed_data: dict) -> Optional[ModelOutp
                 page=1,  # Will be updated with actual page number from context
                 start_char=None,
                 end_char=None,
-                context=context,
+                context=context if context else "Issue identified requiring attention",
                 source="LLM"
             )
             findings_list.append(finding)
@@ -76,11 +82,13 @@ def build_prompt(doc_title: str,
     lines.append("Summary of counts by severity:")
     lines.append(f"High={severity_counts.get('High',0)}, Medium={severity_counts.get('Medium',0)}, Low={severity_counts.get('Low',0)}")
     lines.append("Task:")
-    lines.append("1) For the listed matched phrases, provide brief explanations and concrete rewrite suggestions.")
+    lines.append("1) For EVERY matched phrase, provide detailed explanations and MANDATORY concrete rewrite suggestions.")
     lines.append("2) Identify additional high/medium/low severity phrases not in the list discovered from the snippets, with page if inferable.")
     lines.append("Rules:")
     lines.append('- Only include phrases <= 12 words.')
     lines.append('- Use severities: high, medium, low.')
+    lines.append('- EVERY finding MUST have a suggestion - no exceptions!')
+    lines.append('- Context must include: phrase type, specific issue, why it\'s problematic, and improvement rationale.')
     lines.append('- Output must be a JSON object matching this exact schema:')
     lines.append('{')
     lines.append('  "type": "object",')
@@ -93,8 +101,8 @@ def build_prompt(doc_title: str,
     lines.append('        "properties": {')
     lines.append('          "phrase": {"type": "string", "description": "The exact problematic text you identified"},')
     lines.append('          "severity": {"enum": ["low","medium","high"]},')
-    lines.append('          "suggestion": {"type": "string", "description": "Your concrete rewrite suggestion"},')
-    lines.append('          "context": {"type": "string", "description": "Detailed explanation of why this is problematic and context information"}')
+    lines.append('          "suggestion": {"type": "string", "description": "MANDATORY concrete rewrite suggestion - NEVER leave empty"},')
+    lines.append('          "context": {"type": "string", "description": "Detailed explanation including: phrase type, specific issue, why problematic, improvement rationale"}')
     lines.append('        }')
     lines.append('      }')
     lines.append('    }')
@@ -103,20 +111,13 @@ def build_prompt(doc_title: str,
     lines.append('  "additionalProperties": false')
     lines.append('}')
     lines.append('')
-    lines.append('For each finding:')
+    lines.append('MANDATORY REQUIREMENTS for each finding:')
     lines.append('- phrase: The exact problematic text you identified')
     lines.append('- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor')
-    lines.append('- suggestion: Your concrete rewrite suggestion')
-    lines.append('- context: Detailed explanation of why this is problematic, what type of issue it is, and any relevant context')
-    lines.append('For each finding:')
-    lines.append('- category: Use "tortured_phrase" for problematic academic phrases')
-    lines.append('- page: The page number where the issue was found')
-    lines.append('- section: Brief description of document section (e.g., "Introduction", "Methods")')
-    lines.append('- span: Use format "page_X_span_Y" where X is page number and Y is a unique span ID')
-    lines.append('- exact: The exact problematic text you identified')
-    lines.append('- suggestion: Your concrete rewrite suggestion')
-    lines.append('- rationale: Brief explanation of why this is problematic (max 240 chars)')
-    lines.append('- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor')
+    lines.append('- suggestion: MANDATORY concrete rewrite suggestion - provide specific improved wording for EVERY finding')
+    lines.append('- context: Must include 4 parts: 1) Type of phrase issue 2) Specific problem 3) Why it\'s problematic 4) How suggestion improves it')
+    lines.append('')
+    lines.append('EXAMPLE CONTEXT FORMAT: "Tortured phrase - missing article. This phrase lacks grammatical completeness and sounds unnatural in academic writing. The suggestion adds the missing \'as\' to make it grammatically correct and more professional."')
     text = "\n".join(lines)
     return truncate_to_chars(text, max_chars)
 
@@ -235,6 +236,11 @@ async def query_models_discover(
         prompt = f"""You are auditing scientific/technical prose for "tortured phrases" or risky wording that should be rewritten.
 From the provided page text, extract up to {max_findings_per_page} findings.
 
+CRITICAL REQUIREMENTS:
+- EVERY finding MUST have a concrete suggestion - no exceptions!
+- Context must be detailed and include specific reasoning
+- Focus on tortured phrases, AI fingerprints, awkward sentences, and grammar issues
+
 Output must be a JSON object matching this exact schema:
 {{
   "type": "object",
@@ -247,8 +253,8 @@ Output must be a JSON object matching this exact schema:
         "properties": {{
           "phrase": {{"type": "string", "description": "The exact problematic text you identified"}},
           "severity": {{"enum": ["low","medium","high"]}},
-          "suggestion": {{"type": "string", "description": "Your concrete rewrite suggestion"}},
-          "context": {{"type": "string", "description": "Detailed explanation of why this is problematic and context information"}}
+          "suggestion": {{"type": "string", "description": "MANDATORY concrete rewrite suggestion - NEVER leave empty"}},
+          "context": {{"type": "string", "description": "Detailed explanation including phrase type, specific issue, why problematic, improvement rationale"}}
         }}
       }}
     }}
@@ -257,11 +263,15 @@ Output must be a JSON object matching this exact schema:
   "additionalProperties": false
 }}
 
-For each finding:
+MANDATORY REQUIREMENTS for each finding:
 - phrase: The exact problematic text you identified
-- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor
-- suggestion: Your concrete rewrite suggestion
-- context: Detailed explanation of why this is problematic, what type of issue it is, and any relevant context
+- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor  
+- suggestion: MANDATORY concrete rewrite suggestion with specific improved wording
+- context: Must include 4 parts: 1) Type of issue (tortured phrase/AI fingerprint/grammar) 2) Specific problem 3) Why it's problematic 4) How suggestion improves it
+
+EXAMPLE CONTEXT: "Tortured phrase - grammatical incompleteness. This phrase lacks proper article usage and sounds unnatural in academic writing. The suggestion adds the missing 'as' to create grammatically correct and professional phrasing."
+
+Only include findings where you can provide BOTH a clear problem identification AND a concrete improvement suggestion.
 
 Page {page_num} text:
 \"\"\"{page_text[:6000]}\"\"\"  # hard cap to avoid oversized prompts

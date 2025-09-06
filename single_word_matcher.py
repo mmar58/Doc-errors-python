@@ -156,12 +156,17 @@ class SingleWordMatcher:
         
         prompt_lines.extend([
             "",
+            "CRITICAL REQUIREMENTS:",
+            "- EVERY finding MUST have a concrete suggestion - no exceptions!",
+            "- Context must include detailed reasoning with 4 parts",
+            "- Only include findings where you can provide BOTH clear problem AND concrete solution",
+            "",
             "TASK: Analyze ALL words above for problematic 'tortured phrases' in their given contexts.",
             "For each word where you identify issues in ANY of its contexts:",
             "1. Extract the specific problematic phrase containing the word",
             "2. Assign severity: high, medium, or low",
-            "3. Provide a concrete rewrite suggestion",
-            "4. Categorize the type of issue",
+            "3. Provide a MANDATORY concrete rewrite suggestion",
+            "4. Provide detailed 4-part context explanation",
             "",
             "Output must be a JSON object matching this exact schema:",
             '{',
@@ -175,8 +180,8 @@ class SingleWordMatcher:
             '        "properties": {',
             '          "phrase": {"type": "string", "description": "The exact problematic text you identified"},',
             '          "severity": {"enum": ["low","medium","high"]},',
-            '          "suggestion": {"type": "string", "description": "Your concrete rewrite suggestion"},',
-            '          "context": {"type": "string", "description": "Detailed explanation of why this is problematic and context information"}',
+            '          "suggestion": {"type": "string", "description": "MANDATORY concrete rewrite suggestion - NEVER leave empty"},',
+            '          "context": {"type": "string", "description": "Detailed explanation including phrase type, specific issue, why problematic, improvement rationale"}',
             '        }',
             '      }',
             '    }',
@@ -185,13 +190,15 @@ class SingleWordMatcher:
             '  "additionalProperties": false',
             '}',
             "",
-            "For each finding:",
+            "MANDATORY REQUIREMENTS for each finding:",
             '- phrase: The exact problematic text you identified',
             '- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor',
-            '- suggestion: Your concrete rewrite suggestion',
-            '- context: Detailed explanation of why this is problematic, what type of issue it is, and any relevant context',
+            '- suggestion: MANDATORY concrete rewrite suggestion with specific improved wording',
+            '- context: Must include 4 parts: 1) Type of issue (tortured phrase/grammar/awkward) 2) Specific problem 3) Why it\'s problematic 4) How suggestion improves it',
             "",
-            "Only include findings where you're confident there's an actual issue."
+            'EXAMPLE CONTEXT: "Tortured phrase - missing preposition. The phrase lacks grammatical completeness which is common in AI-generated content. The suggestion adds the missing \'as\' to create proper grammar and natural academic tone."',
+            "",
+            "Only include findings where you can provide BOTH a clear problem identification AND a concrete improvement suggestion."
         ])
         
         prompt = "\n".join(prompt_lines)
@@ -267,7 +274,13 @@ class SingleWordMatcher:
             context = finding_data.get('context', '')
             
             if not phrase:
+                print(f"[SingleWordMatcher] Skipping finding with empty phrase")
                 return None
+            
+            # Validate suggestion is not empty - this is now mandatory
+            if not suggestion or suggestion.strip() == '':
+                print(f"[SingleWordMatcher] Warning: Empty suggestion for phrase '{phrase}' - generating fallback")
+                suggestion = f"Rewrite '{phrase}' for better clarity and academic tone"
             
             # Convert severity to title case for compatibility
             severity_map = {'low': 'Low', 'medium': 'Medium', 'high': 'High'}
@@ -280,7 +293,7 @@ class SingleWordMatcher:
                 page=1,  # Will be updated with actual page number from batch context
                 start_char=None,
                 end_char=None,
-                context=context,
+                context=context if context else "Single word analysis - issue identified requiring attention",
                 source="LLM"
             )
             

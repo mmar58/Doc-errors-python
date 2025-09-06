@@ -177,12 +177,15 @@ async def analyze_single_word_with_llm(
         '  "additionalProperties": false',
         '}',
         "",
-        "For each finding:",
+        "MANDATORY REQUIREMENTS for each finding:",
         '- phrase: The exact problematic text you identified',
         '- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor',
-        '- suggestion: Your concrete rewrite suggestion',
-        '- context: Detailed explanation of why this is problematic, what type of issue it is, and any relevant context',
+        '- suggestion: MANDATORY concrete rewrite suggestion with specific improved wording - NEVER leave empty',
+        '- context: Must include 4 parts: 1) Type of issue (tortured phrase/AI fingerprint/grammar) 2) Specific problem 3) Why it\'s problematic 4) How suggestion improves it',
         "",
+        'EXAMPLE CONTEXT: "Tortured phrase - grammatical incompleteness. This phrase lacks proper structure and sounds unnatural in academic writing. The suggestion provides grammatically correct and professional phrasing."',
+        "",
+        "CRITICAL: Every finding MUST have both a clear problem identification AND a concrete improvement suggestion.",
         "Only include findings where you're confident there's an actual issue."
     ])
     
