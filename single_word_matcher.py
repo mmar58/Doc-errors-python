@@ -126,11 +126,16 @@ class SingleWordMatcher:
         """
         Analyze a batch of words with LLM in a single call for efficiency.
         """
+        print(f"[SingleWordMatcher] === STARTING SINGLE WORD BATCH ANALYSIS ===")
+        print(f"[SingleWordMatcher] Document: {doc_title}")
+        print(f"[SingleWordMatcher] Batch size: {len(word_batch)} words")
+        
         from llm_clients import call_routellm
         from config import settings
         import json
         
         if not word_batch:
+            print(f"[SingleWordMatcher] Empty word batch, returning no findings")
             return []
         
         # Build comprehensive prompt for batch analysis
@@ -166,16 +171,12 @@ class SingleWordMatcher:
             '      "type": "array",',
             '      "items": {',
             '        "type": "object",',
-            '        "required": ["category","page","section","span","exact","suggestion","rationale","severity"],',
+            '        "required": ["phrase","severity","suggestion","context"],',
             '        "properties": {',
-            '          "category": {"enum": ["tortured_phrase","ai_fingerprint","awkward_sentence","grammar_formatting"]},',
-            '          "page": {"type": "integer", "minimum": 1},',
-            '          "section": {"type": "string"},',
-            '          "span": {"type": "string", "description": "span_id from sentences.jsonl"},',
-            '          "exact": {"type": "string"},',
-            '          "suggestion": {"type": "string"},',
-            '          "rationale": {"type": "string", "maxLength": 240},',
-            '          "severity": {"enum": ["low","medium","high"]}',
+            '          "phrase": {"type": "string", "description": "The exact problematic text you identified"},',
+            '          "severity": {"enum": ["low","medium","high"]},',
+            '          "suggestion": {"type": "string", "description": "Your concrete rewrite suggestion"},',
+            '          "context": {"type": "string", "description": "Detailed explanation of why this is problematic and context information"}',
             '        }',
             '      }',
             '    }',
@@ -185,14 +186,10 @@ class SingleWordMatcher:
             '}',
             "",
             "For each finding:",
-            '- category: Use "tortured_phrase" for problematic academic phrases',
-            '- page: The page number where the issue was found',
-            '- section: Brief description of document section (e.g., "Introduction", "Methods")',
-            '- span: Use format "page_X_span_Y" where X is page number and Y is a unique span ID',
-            '- exact: The exact problematic text you identified',
-            '- suggestion: Your concrete rewrite suggestion',
-            '- rationale: Brief explanation of why this is problematic (max 240 chars)',
+            '- phrase: The exact problematic text you identified',
             '- severity: "high" for clearly problematic, "medium" for questionable, "low" for minor',
+            '- suggestion: Your concrete rewrite suggestion',
+            '- context: Detailed explanation of why this is problematic, what type of issue it is, and any relevant context',
             "",
             "Only include findings where you're confident there's an actual issue."
         ])
@@ -204,39 +201,52 @@ class SingleWordMatcher:
         
         try:
             # Try GPT-5 first
-            print(f"[SingleWordMatcher] Calling GPT-5 for batch of {len(word_batch)} words")
+            print(f"[SingleWordMatcher] === CALLING GPT-5 FOR SINGLE WORD BATCH ===")
+            print(f"[SingleWordMatcher] Batch size: {len(word_batch)} words")
+            print(f"[SingleWordMatcher] Words in batch: {[word[0] for word in word_batch[:5]]}{'...' if len(word_batch) > 5 else ''}")
             result = await call_routellm(settings.ROUTELLM_MODEL_GPT5, prompt)
             if result and hasattr(result, 'findings') and result.findings:
-                for finding_data in result.findings:
+                print(f"[SingleWordMatcher] ✓ GPT-5 SINGLE WORD BATCH SUCCESS: {len(result.findings)} findings")
+                for i, finding_data in enumerate(result.findings):
                     # Convert new format to Finding object
                     finding = self._convert_to_finding(finding_data)
                     if finding:
                         finding.source = "LLM-SingleWord-Batch"
                         all_findings.append(finding)
-                print(f"[SingleWordMatcher] GPT-5 returned {len(result.findings)} findings")
+                        print(f"[SingleWordMatcher]   GPT-5 SingleWord Finding {i+1}: '{finding.phrase}' -> '{finding.suggestion}' (severity: {finding.severity})")
+            else:
+                print(f"[SingleWordMatcher] ✗ GPT-5 SINGLE WORD BATCH: No findings returned")
         except Exception as e:
-            print(f"[SingleWordMatcher] GPT-5 batch call failed: {e}")
+            print(f"[SingleWordMatcher] ✗ GPT-5 SINGLE WORD BATCH FAILED: {e}")
         
         try:
             # Try Claude as backup/additional analysis
-            print(f"[SingleWordMatcher] Calling Claude for batch of {len(word_batch)} words")
+            print(f"[SingleWordMatcher] === CALLING CLAUDE FOR SINGLE WORD BATCH ===")
+            print(f"[SingleWordMatcher] Batch size: {len(word_batch)} words")
             result = await call_routellm(settings.ROUTELLM_MODEL_CLAUDE, prompt)
             if result and hasattr(result, 'findings') and result.findings:
-                for finding_data in result.findings:
+                print(f"[SingleWordMatcher] ✓ CLAUDE SINGLE WORD BATCH SUCCESS: {len(result.findings)} findings")
+                for i, finding_data in enumerate(result.findings):
                     # Convert new format to Finding object
                     finding = self._convert_to_finding(finding_data)
                     if finding:
                         finding.source = "LLM-SingleWord-Batch"
                         all_findings.append(finding)
-                print(f"[SingleWordMatcher] Claude returned {len(result.findings)} findings")
+                        print(f"[SingleWordMatcher]   Claude SingleWord Finding {i+1}: '{finding.phrase}' -> '{finding.suggestion}' (severity: {finding.severity})")
+            else:
+                print(f"[SingleWordMatcher] ✗ CLAUDE SINGLE WORD BATCH: No findings returned")
         except Exception as e:
-            print(f"[SingleWordMatcher] Claude batch call failed: {e}")
+            print(f"[SingleWordMatcher] ✗ CLAUDE SINGLE WORD BATCH FAILED: {e}")
+        
+        print(f"[SingleWordMatcher] === SINGLE WORD BATCH ANALYSIS COMPLETED ===")
+        print(f"[SingleWordMatcher] Total findings from both models: {len(all_findings)}")
         
         # Add position information from the original word matches
         for finding in all_findings:
-            # Try to match finding to original word position
+            # Try to match finding to original word position and set correct page number
             for word, page_num, start_char, end_char, phrase_candidates in word_batch:
-                if finding.page == page_num and word.lower() in (finding.phrase or "").lower():
+                if word.lower() in (finding.phrase or "").lower():
+                    finding.page = page_num  # Set the actual page number from our context
                     if finding.start_char is None:
                         finding.start_char = start_char
                     if finding.end_char is None:
@@ -247,39 +257,27 @@ class SingleWordMatcher:
     
     def _convert_to_finding(self, finding_data: dict) -> Optional[Finding]:
         """
-        Convert new JSON format to Finding object.
+        Convert simplified JSON format to Finding object.
         """
         try:
-            # Extract required fields
-            category = finding_data.get('category', 'tortured_phrase')
-            page = finding_data.get('page', 1)
-            section = finding_data.get('section', '')
-            span = finding_data.get('span', '')
-            exact = finding_data.get('exact', '')
-            suggestion = finding_data.get('suggestion', '')
-            rationale = finding_data.get('rationale', '')
+            # Extract required fields from simplified format
+            phrase = finding_data.get('phrase', '')
             severity = finding_data.get('severity', 'medium')
+            suggestion = finding_data.get('suggestion', '')
+            context = finding_data.get('context', '')
+            
+            if not phrase:
+                return None
             
             # Convert severity to title case for compatibility
             severity_map = {'low': 'Low', 'medium': 'Medium', 'high': 'High'}
             severity_title = severity_map.get(severity.lower(), 'Medium')
             
-            # Create context from section and rationale
-            context_parts = []
-            if section:
-                context_parts.append(f"Section: {section}")
-            if rationale:
-                context_parts.append(f"Issue: {rationale}")
-            if span:
-                context_parts.append(f"Span: {span}")
-            
-            context = " | ".join(context_parts) if context_parts else rationale
-            
             return Finding(
-                phrase=exact,
+                phrase=phrase,
                 severity=severity_title,
                 suggestion=suggestion,
-                page=page,
+                page=1,  # Will be updated with actual page number from batch context
                 start_char=None,
                 end_char=None,
                 context=context,

@@ -545,11 +545,23 @@ def ui_result(job_id: str):
         suggestion = (f.suggestion or "").replace("<", "&lt;").replace(">", "&gt;")
         context = (f.context or "").replace("<", "&lt;").replace(">", "&gt;")
         
+        # Add source indicator for enhanced tracking
+        source_badge = ""
+        if f.source == "LLM-SingleWord-Batch":
+            source_badge = " <span style='background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500;'>AI-Enhanced Single Word</span>"
+        elif f.source == "LLM-SingleWord":
+            source_badge = " <span style='background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500;'>AI-Enhanced Single Word</span>"
+        elif f.source == "LLM":
+            source_badge = " <span style='background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500;'>AI-Discovered</span>"
+        elif f.source == "CSV":
+            source_badge = " <span style='background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 500;'>Lexicon</span>"
+        
         cards_html.append(f"""
           <div style="border-left: 4px solid {color}; background: white; margin: 16px 0; padding: 16px; border-radius: 0 8px 8px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <div style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 12px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 12px; align-items: center;">
               <div><strong>Severity:</strong> <span style="color: {color}; font-weight: bold;">{f.severity}</span></div>
               <div><strong>Page:</strong> {f.page}</div>
+              {source_badge}
             </div>
             
             <div style="margin-bottom: 12px;">
