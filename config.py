@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False)
 
     # RouteLLM / Abacus
-    ABACUS_API_KEY: str | None = Field(default="s2_8fe4b2ba5e984913af78aea198072d70")
+    ABACUS_API_KEY: str | None = Field(default=None)
     ABACUS_BASE_URL: str = Field(default="https://routellm.abacus.ai/v1")
     ROUTELLM_MODEL_GPT5: str = Field(default="gpt-5")
     ROUTELLM_MODEL_CLAUDE: str = Field(default="claude-sonnet-4-20250514")
@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     # Timeouts
     LLM_TIMEOUT_SECS: float = Field(default=18.0)
+    DISCOVERY_TIMEOUT_SECS: float = Field(default=45.0)  # Even longer timeout for complex discovery tasks
 
     # Optional enhancements (off by default)
     ENABLE_AUTOMATON_CACHE: bool = Field(default=False)
